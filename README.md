@@ -1,8 +1,10 @@
-# Nomic Embed Text v1.5 on AMD RDNA 3 (gfx1102)
+# Embeddings Node (mlops-node-3.lan): Nomic Embed Text v1.5
 
-This repository builds a ROCm `llama.cpp` embedding server for an AMD RDNA 3
-GPU (`gfx1102`). The container supplies ROCm user space; the Linux host
-must provide a working AMDGPU driver and expose `/dev/kfd` and `/dev/dri`.
+This node generates codebase vectors for the Librarian's search index. Its
+target is an AMD RX 7550 Pro with 16 GB GDDR6 (`gfx1102`). This repository
+builds a ROCm `llama.cpp` embedding server; the container supplies ROCm user
+space, while the Linux host must provide a working AMDGPU driver and expose
+`/dev/kfd` and `/dev/dri`.
 
 ## Model and context
 

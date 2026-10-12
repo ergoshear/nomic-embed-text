@@ -1,24 +1,40 @@
-FROM rocm/dev-ubuntu-22.04:latest AS builder
+# syntax=docker/dockerfile:1
+# AMD RDNA 3 GPU (gfx1102); the host supplies amdgpu/KFD.
+FROM docker.io/rocm/dev-ubuntu-24.04:7.2.3-complete@sha256:ec1b59bf75ec1122e7a091c0be82301ba12458b038499ef96a5c115876bd78d2
 
-RUN apt-get update && apt-get install -y build-essential cmake git
+ENV DEBIAN_FRONTEND=noninteractive \
+    ROCM_PATH=/opt/rocm
 
-RUN git clone https://github.com/ggerganov/llama.cpp.git /app
-WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates cmake curl ninja-build \
+    && rm -rf /var/lib/apt/lists/*
 
-# Compile for RDNA 3 architecture
-RUN cmake -B build -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1102 -DCMAKE_BUILD_TYPE=Release
-RUN cmake --build build --config Release --target llama-server -j$(nproc)
+# Pinned llama.cpp revision shared with the other model images.
+ARG LLAMA_CPP_REF=8345f333951c661d166b00e6f9362e553768f292
+RUN mkdir -p /opt/llama.cpp \
+    && curl -fL --retry 5 \
+      "https://codeload.github.com/ggml-org/llama.cpp/tar.gz/${LLAMA_CPP_REF}" \
+      | tar -xz --strip-components=1 -C /opt/llama.cpp
 
-FROM rocm/dev-ubuntu-22.04:latest
-COPY --from=builder /app/build/bin/llama-server /usr/local/bin/
+WORKDIR /opt/llama.cpp
+ARG BUILD_JOBS=4
+RUN cmake -S . -B build -G Ninja \
+      -DGGML_HIP=ON \
+      -DGPU_TARGETS=gfx1102 \
+      -DCMAKE_HIP_ARCHITECTURES=gfx1102 \
+      -DGGML_NATIVE=OFF \
+      -DLLAMA_CURL=OFF \
+      -DLLAMA_BUILD_TESTS=OFF \
+      -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build --target llama-server --parallel "$BUILD_JOBS"
 
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64
+RUN apt-get update && apt-get install -y --no-install-recommends jq \
+    && rm -rf /var/lib/apt/lists/*
+COPY entrypoint.sh /usr/local/bin/nomic-embed-entrypoint
+COPY download-model.sh /usr/local/bin/download-model
+RUN chmod 0755 /usr/local/bin/nomic-embed-entrypoint /usr/local/bin/download-model
+
+VOLUME ["/models"]
 EXPOSE 8080
-
-# Execute strictly for embeddings calculation (--embedding)
-ENTRYPOINT ["llama-server"]
-CMD ["--hf-repo", "nomic-ai/nomic-embed-text-v1.5-GGUF", \
-     "--hf-file", "nomic-embed-text-v1.5.Q8_0.gguf", \
-     "--n-gpu-layers", "999", \
-     "--embedding", \
-     "--host", "0.0.0.0", \
-     "--port", "8080"]
+ENTRYPOINT ["/usr/local/bin/nomic-embed-entrypoint"]
